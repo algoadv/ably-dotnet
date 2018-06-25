@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
+using IO.Ably.Shared;
 
 namespace IO.Ably
 {
@@ -11,7 +12,7 @@ namespace IO.Ably
     public class AuthOptions
     {
         /// <summary>
-        /// The callback used to get a new <see cref="IO.Ably.TokenDetails"/> or <see cref="IO.Ably.TokenRequest"/>.
+        /// The callback used to get a new token string or <see cref="IO.Ably.TokenDetails"/> or <see cref="IO.Ably.TokenRequest"/>.
         /// AuthCallback is used by internally by <see cref="IO.Ably.AblyAuth"/>.RequestTokenAsync.
         /// </summary>
         public Func<TokenParams, Task<object>> AuthCallback { get; set; }

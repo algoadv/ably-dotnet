@@ -180,7 +180,7 @@ namespace IO.Ably
 
             EnsureSecureConnection();
 
-            var request = _rest.CreatePostRequest($"/keys/{keyId}/requestToken");
+            var request = _rest.CreatePostRequest(RequestTokenUrl(keyId));
             request.SkipAuthentication = true;
             TokenRequest postData = null;
             if (mergedOptions.AuthCallback != null)
@@ -192,30 +192,62 @@ namespace IO.Ably
 
                     if (callbackResult == null)
                     {
-                        throw new AblyException("AuthCallback returned null", 80019);
+                        throw new AblyException("AuthCallback returned null", 80019, HttpStatusCode.Unauthorized);
                     }
 
-                    if (callbackResult is TokenDetails)
+                    if (callbackResult.ErrorInfo != null)
                     {
-                        return callbackResult as TokenDetails;
+                        shouldCatch = false;
+                        throw new AblyException(
+                            $"AuthCallback returned an error: {callbackResult.ErrorInfo.Message}" ,
+                            80019,
+                            callbackResult.ErrorInfo.StatusCode == HttpStatusCode.Forbidden ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized);
                     }
 
-                    if (callbackResult is TokenRequest || callbackResult is string)
+                    if (callbackResult.TokenCompatibleObject == null)
                     {
-                        postData = GetTokenRequest(callbackResult);
-                        request.Url = $"/keys/{postData.KeyName}/requestToken";
+                        throw new AblyException("AuthCallback returned an AuthCallbackResult with a null TokenCompatibleObject", 80019, HttpStatusCode.Unauthorized);
+                    }
+
+                    if (callbackResult.TokenCompatibleObject is TokenDetails details)
+                    {
+                        return details;
+                    }
+
+                    if (callbackResult.TokenCompatibleObject is string tokenString)
+                    {
+                        return new TokenDetails(tokenString, Now)
+                        {
+                            Expires = DateTimeOffset.MaxValue
+                        };
+                    }
+
+                    if (callbackResult.TokenCompatibleObject is TokenRequest tokenRequest)
+                    {
+                        postData = tokenRequest;
+                        request.Url = RequestTokenUrl(postData.KeyName);
                     }
                     else
                     {
                         shouldCatch = false;
-                        throw new AblyException($"AuthCallback returned an unsupported type ({callbackResult.GetType()}. Expected either TokenDetails or TokenRequest", 80019);
+                        throw new AblyException(
+                            $"AuthCallbackResult contains an unsupported type ({callbackResult.TokenCompatibleObject.GetType()}. Expected either TokenDetails or TokenRequest",
+                            80019);
                     }
+                }
+                catch (AblyException aex) when (shouldCatch && aex.ErrorInfo?.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    throw new AblyException(
+                            "Error calling AuthCallback, token request failed. See inner exception for details.",
+                            80019,
+                            HttpStatusCode.Forbidden,
+                            aex);
                 }
                 catch (Exception ex) when (shouldCatch)
                 {
                     throw new AblyException(
                         new ErrorInfo(
-                        "Error calling AuthCallback, token request failed. See inner exception for details.", 80019), ex);
+                        "Error calling AuthCallback, token request failed. See inner exception for details.", 80019, HttpStatusCode.Unauthorized), ex);
                 }
             }
             else if (mergedOptions.AuthUrl.IsNotEmpty())
@@ -239,8 +271,7 @@ namespace IO.Ably
                     }
 
                     postData = JsonHelper.Deserialize<TokenRequest>(signedData);
-
-                    request.Url = $"/keys/{postData.KeyName}/requestToken";
+                    request.Url = RequestTokenUrl(postData.KeyName);
                 }
                 catch (AblyException ex)
                 {
@@ -267,29 +298,6 @@ namespace IO.Ably
             }
 
             return result;
-        }
-
-        private static TokenRequest GetTokenRequest(object callbackResult)
-        {
-            if (callbackResult is TokenRequest)
-            {
-                return callbackResult as TokenRequest;
-            }
-
-            try
-            {
-                var result = JsonHelper.Deserialize<TokenRequest>((string)callbackResult);
-                if (result == null)
-                {
-                    throw new AblyException(new ErrorInfo($"AuthCallback returned a string which can't be converted to TokenRequest. ({callbackResult})."));
-                }
-
-                return result;
-            }
-            catch (Exception e)
-            {
-                throw new AblyException(new ErrorInfo($"AuthCallback returned a string which can't be converted to TokenRequest. ({callbackResult})."), e);
-            }
         }
 
         private TokenParams MergeTokenParamsWithDefaults(TokenParams tokenParams)
@@ -547,6 +555,11 @@ namespace IO.Ably
         public string CreateTokenRequest(TokenParams tokenParams = null, AuthOptions authOptions = null)
         {
             return AsyncHelper.RunSync(() => CreateTokenRequestAsync(tokenParams, authOptions));
+        }
+
+        private string RequestTokenUrl(string key)
+        {
+            return $"/keys/{key}/requestToken";
         }
     }
 }
