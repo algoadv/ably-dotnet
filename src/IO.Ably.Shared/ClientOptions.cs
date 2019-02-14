@@ -12,6 +12,7 @@ namespace IO.Ably
         private string _clientId;
         private Func<DateTimeOffset> _nowFunc;
         private bool _useBinaryProtocol = false;
+        private string[] _fallbackHosts;
 
         /// <summary>
         ///
@@ -88,6 +89,29 @@ namespace IO.Ably
         /// </summary>
         public string RestHost { get; set; }
 
+        /// <summary>
+        /// Gets or sets an array of custom Fallback hosts to be (optionally) used in place of the defaults.
+        /// If an empty array is specified, then fallback host functionality is disabled.
+        /// </summary>
+        public string[] FallbackHosts
+        {
+            get
+            {
+                if (_fallbackHosts is null)
+                {
+                    return Defaults.FallbackHosts;
+                }
+                return _fallbackHosts;
+            }
+            set => _fallbackHosts = value;
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to use default FallbackHosts even when overriding
+        /// environment or restHost/realtimeHost
+        /// </summary>
+        public bool FallbackHostsUseDefault { get; set; }
+
         internal bool IsLiveEnvironment => Environment.IsEmpty() || Environment == "live";
 
         internal bool IsDefaultRestHost => RestHost.IsEmpty() && IsDefaultPort && IsLiveEnvironment;
@@ -159,6 +183,8 @@ namespace IO.Ably
 
         public TimeSpan SuspendedRetryTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
+        public TimeSpan ChannelRetryTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
         public TimeSpan HttpOpenTimeout { get; set; } = TimeSpan.FromSeconds(4);
 
         public TimeSpan HttpRequestTimeout { get; set; } = TimeSpan.FromSeconds(10);
@@ -179,6 +205,8 @@ namespace IO.Ably
         public bool CaptureCurrentSynchronizationContext { get; set; } = true;
 
         public SynchronizationContext CustomContext { get; set; }
+
+        public bool IdempotentRestPublishing { get; set; }
 
         internal Func<DateTimeOffset> NowFunc
         {
@@ -219,6 +247,7 @@ namespace IO.Ably
         /// </summary>
         public ClientOptions()
         {
+            Init();
         }
 
         /// <summary>
@@ -229,6 +258,21 @@ namespace IO.Ably
         public ClientOptions(string key)
             : base(key)
         {
+            Init();
+        }
+
+        private void Init()
+        {
+            SetIdempotentRestPublishingDefault(Defaults.ProtocolMajorVersion, Defaults.ProtocolMinorVersion);
+        }
+
+        internal void SetIdempotentRestPublishingDefault(int majorVersion, int minorVersion)
+        {
+            // (TO3n) idempotentRestPublishing defaults to false for clients with version < 1.1, otherwise true.
+            if (majorVersion >= 1 && minorVersion >= 1)
+            {
+                IdempotentRestPublishing = true;
+            }
         }
     }
 }

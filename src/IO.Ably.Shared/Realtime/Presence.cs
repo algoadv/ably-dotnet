@@ -305,14 +305,37 @@ namespace IO.Ably.Realtime
 
         internal void UpdatePresence(PresenceMessage msg, Action<bool, ErrorInfo> callback)
         {
+            switch (_connection.Connection.State)
+            {
+                case ConnectionState.Initialized:
+                case ConnectionState.Connecting:
+                case ConnectionState.Disconnected:
+                case ConnectionState.Connected:
+                    break;
+                default:
+                    throw new AblyException(
+                        new ErrorInfo(
+                            $"Unable to enter presence channel when connection is in a ${_connection.Connection.State} state",
+                            91001,
+                            HttpStatusCode.BadRequest));
+            }
+
             switch (_channel.State)
             {
                 case ChannelState.Initialized:
-                    PendingPresenceQueue.Enqueue(new QueuedPresenceMessage(msg, callback));
-                    _channel.Attach();
+                    if (_connection.Options.QueueMessages)
+                    {
+                        PendingPresenceQueue.Enqueue(new QueuedPresenceMessage(msg, callback));
+                        _channel.Attach();
+                    }
+
                     break;
                 case ChannelState.Attaching:
-                    PendingPresenceQueue.Enqueue(new QueuedPresenceMessage(msg, callback));
+                    if (_connection.Options.QueueMessages)
+                    {
+                        PendingPresenceQueue.Enqueue(new QueuedPresenceMessage(msg, callback));
+                    }
+
                     break;
                 case ChannelState.Attached:
                     var message = new ProtocolMessage(ProtocolMessage.MessageAction.Presence, _channel.Name);
@@ -320,7 +343,7 @@ namespace IO.Ably.Realtime
                     _connection.Send(message, callback);
                     break;
                 default:
-                    throw new AblyException("Unable to enter presence channel in detached or failed state", 91001, HttpStatusCode.BadRequest);
+                    throw new AblyException($"Unable to enter presence channel in {_channel.State} state", 91001, HttpStatusCode.BadRequest);
             }
         }
 
@@ -346,15 +369,6 @@ namespace IO.Ably.Realtime
                 string syncCursor = null;
                 if (syncChannelSerial != null)
                 {
-                    syncCursor = syncChannelSerial.Substring(syncChannelSerial.IndexOf(':'));
-                    if (syncCursor.Length > 1)
-                    {
-                        Map.StartSync();
-                    }
-                }
-
-                if (syncChannelSerial != null)
-                {
                     int colonPos = syncChannelSerial.IndexOf(':');
                     string serial = colonPos >= 0 ? syncChannelSerial.Substring(0, colonPos) : syncChannelSerial;
 
@@ -362,7 +376,6 @@ namespace IO.Ably.Realtime
                     if (Map.IsSyncInProgress && _currentSyncChannelSerial != null
                                              && _currentSyncChannelSerial != serial)
                     {
-                        /* TODO: For v1.0 we should emit leave messages here. See https://github.com/ably/ably-java/blob/159018c30b3ef813a9d3ca3c6bc82f51aacbbc68/lib/src/main/java/io/ably/lib/realtime/Presence.java#L219 for example. */
                         _currentSyncChannelSerial = null;
                         EndSync();
                     }
@@ -408,7 +421,7 @@ namespace IO.Ably.Realtime
                 }
 
                 // if this is the last message in a sequence of sync updates, end the sync
-                if ((syncChannelSerial == null) || (syncCursor.Length <= 1))
+                if (syncChannelSerial == null || syncCursor.Length <= 1)
                 {
                     EndSync();
                 }

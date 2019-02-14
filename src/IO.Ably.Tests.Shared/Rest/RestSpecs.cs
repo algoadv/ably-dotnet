@@ -312,6 +312,31 @@ namespace IO.Ably.Tests
                 Logger.LoggerSink.Should().BeOfType<TestLogHandler>();
             }
 
+            [Fact]
+            [Trait("spec", "TO3n")]
+            public void ClientOptions_IdempotentPublishingDefaultToFalseForVersionsBelow1_1()
+            {
+                var clientOptions = new ClientOptions();
+
+                // Currently working against 1.0 so this should be false
+                clientOptions.IdempotentRestPublishing.Should().BeFalse();
+
+                // Test the internal method that is called from
+                // ClientOptions constructor with different
+                // major and minor versions
+                clientOptions.SetIdempotentRestPublishingDefault(0, 8);
+                clientOptions.IdempotentRestPublishing.Should().BeFalse();
+
+                clientOptions.SetIdempotentRestPublishingDefault(1, 0);
+                clientOptions.IdempotentRestPublishing.Should().BeFalse();
+
+                clientOptions.SetIdempotentRestPublishingDefault(1, 1);
+                clientOptions.IdempotentRestPublishing.Should().BeTrue();
+
+                clientOptions.SetIdempotentRestPublishingDefault(2, 0);
+                clientOptions.IdempotentRestPublishing.Should().BeTrue();
+            }
+
             private static async Task MakeAnyRequest(AblyRest client)
             {
                 await client.Channels.Get("boo").PublishAsync("boo", "baa");
@@ -500,6 +525,61 @@ namespace IO.Ably.Tests
                 var ex = await Assert.ThrowsAsync<AblyException>(() => MakeAnyRequest(client));
 
                 _handler.Requests.Count.Should().Be(Defaults.FallbackHosts.Length + 1); // First attempt is with rest.ably.io
+            }
+
+            [Fact]
+            [Trait("spec", "RSC15a")]
+            [Trait("spec", "TO3k6")]
+            public async Task ShouldUseCustomFallbackHostIfProvided()
+            {
+                _response.StatusCode = HttpStatusCode.BadGateway;
+                List<string> attemptedList = new List<string>();
+
+                var client = CreateClient(options => options.FallbackHosts = new[] { "www.example.com" });
+                await Assert.ThrowsAsync<AblyException>(() => MakeAnyRequest(client));
+                attemptedList.AddRange(_handler.Requests.Select(x => x.RequestUri.Host).ToList());
+
+                attemptedList.Count.Should().Be(2);
+                attemptedList[0].Should().Be("rest.ably.io");
+                attemptedList[1].Should().Be("www.example.com");
+            }
+
+            [Fact]
+            [Trait("spec", "RSC15a")]
+            [Trait("spec", "TO3k6")]
+            public async Task ShouldNotUseAnyFallbackHostsIfEmptyArrayProvided()
+            {
+                _response.StatusCode = HttpStatusCode.BadGateway;
+                List<string> attemptedList = new List<string>();
+
+                var client = CreateClient(options => options.FallbackHosts = new string[] { });
+                await Assert.ThrowsAsync<AblyException>(() => MakeAnyRequest(client));
+                attemptedList.AddRange(_handler.Requests.Select(x => x.RequestUri.Host).ToList());
+
+                attemptedList.Count.Should().Be(1);
+                attemptedList[0].Should().Be("rest.ably.io");
+            }
+
+            [Fact]
+            [Trait("spec", "RSC15a")]
+            [Trait("spec", "TO3k6")]
+            public async Task ShouldUseDefaultFallbackHostsIfNullArrayProvided()
+            {
+                _response.StatusCode = HttpStatusCode.BadGateway;
+                List<string> attemptedList = new List<string>();
+
+                var client = CreateClient(options =>
+                {
+                    options.FallbackHosts = null;
+                });
+                await Assert.ThrowsAsync<AblyException>(() => MakeAnyRequest(client));
+                attemptedList.AddRange(_handler.Requests.Select(x => x.RequestUri.Host).ToList());
+
+                attemptedList.Count.Should().Be(3); // HttpMaxRetryCount defaults to 3
+                attemptedList[0].Should().Be("rest.ably.io");
+                attemptedList[1].Should().EndWith("ably-realtime.com");
+                attemptedList[2].Should().EndWith("ably-realtime.com");
+                attemptedList[1].Should().NotBe(attemptedList[2]);
             }
 
             /// <summary>
