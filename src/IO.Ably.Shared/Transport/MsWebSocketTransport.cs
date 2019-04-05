@@ -118,7 +118,7 @@ namespace IO.Ably.Transport
                     DetachEvents();
                 }
 
-                Task.Run(_socket.StopConnectionAsync).ConfigureAwait(false);
+                _socket.StopConnectionAsync().WaitAndUnwrapException();
             }
         }
 
@@ -126,11 +126,11 @@ namespace IO.Ably.Transport
         {
             if (BinaryProtocol)
             {
-                Task.Run(() => _socket.SendData(data.Data));
+                _socket.SendData(data.Data);
             }
             else
             {
-                Task.Run(() => _socket.SendText(data.Text));
+                _socket.SendText(data.Text);
             }
         }
 

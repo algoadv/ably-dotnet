@@ -197,6 +197,9 @@ namespace IO.Ably.Transport
             });
         }
 
+        private object _createTransportLock = new object();
+        private object _destroyTransportLock = new object();
+
         public async Task CreateTransport()
         {
             if (Logger.IsDebug)
@@ -209,22 +212,26 @@ namespace IO.Ably.Transport
                 (this as IConnectionContext).DestroyTransport();
             }
 
-            try
+            var transportParams = await CreateTransportParameters();
+            lock (_createTransportLock)
             {
-                var transport = GetTransportFactory().CreateTransport(await CreateTransportParameters());
-                transport.Listener = this;
-                Transport = transport;
-                Transport.Connect();
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Error while creating transport!.", ex.Message);
-                if (ex is AblyException)
+                try
                 {
-                    throw;
+                    var transport = GetTransportFactory().CreateTransport(transportParams);
+                    transport.Listener = this;
+                    Transport = transport;
+                    Transport.Connect();
                 }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error while creating transport!.", ex.Message);
+                    if (ex is AblyException)
+                    {
+                        throw;
+                    }
 
-                throw new AblyException(ex);
+                    throw new AblyException(ex);
+                }
             }
         }
 
@@ -240,19 +247,22 @@ namespace IO.Ably.Transport
                 return;
             }
 
-            try
+            lock (_createTransportLock)
             {
-                Transport.Listener = null;
-                Transport.Dispose();
-            }
-            catch (Exception e)
-            {
-                Logger.Warning("Error while destroying transport. Nothing to worry about. Cleaning up. Error: " +
-                               e.Message);
-            }
-            finally
-            {
-                Transport = null;
+                try
+                {
+                    Transport.Listener = null;
+                    Transport.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Logger.Warning("Error while destroying transport. Nothing to worry about. Cleaning up. Error: " +
+                                   e.Message);
+                }
+                finally
+                {
+                    Transport = null;
+                }
             }
         }
 
@@ -334,7 +344,7 @@ namespace IO.Ably.Transport
             // Encode message/presence payloads
             Handler.EncodeProtocolMessage(message, channelOptions);
 
-            if (State.CanSend)
+            if (State.CanSend && Transport.State == TransportState.Connected)
             {
                 SendMessage(message, callback);
                 return;
@@ -458,6 +468,12 @@ namespace IO.Ably.Transport
 
         public void SendPendingMessages(bool resumed)
         {
+            if (Transport.State != TransportState.Connected)
+            {
+                Logger.Debug("Transport is not connected, can't send");
+                return;
+            }
+
             if (resumed)
             {
                 // Resend any messages waiting an Ack Queue
@@ -474,10 +490,13 @@ namespace IO.Ably.Transport
                     Logger.Debug("Sending pending message: Count: " + PendingMessages.Count);
                 }
 
-                while (PendingMessages.Count > 0)
+                if (State.CanSend && Transport.State == TransportState.Connected)
                 {
-                    var queuedMessage = PendingMessages.Dequeue();
-                    SendMessage(queuedMessage.Message, queuedMessage.Callback);
+                    while (PendingMessages.Count > 0)
+                    {
+                        var queuedMessage = PendingMessages.Dequeue();
+                        SendMessage(queuedMessage.Message, queuedMessage.Callback);
+                    }
                 }
             }
         }

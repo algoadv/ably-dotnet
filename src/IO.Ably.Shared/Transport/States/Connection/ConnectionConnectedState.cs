@@ -23,6 +23,8 @@ namespace IO.Ably.Transport.States.Connection
 
         public override bool CanSend => true;
 
+        public override bool CanQueue => true;
+
         public override void Close()
         {
             Context.SetState(new ConnectionClosingState(Context, Logger));
