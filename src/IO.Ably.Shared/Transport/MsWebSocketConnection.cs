@@ -171,7 +171,7 @@ namespace IO.Ably.Transport
 
                         if (Logger.IsDebug)
                         {
-                            Logger.Debug("Recieving message with type: " + result.MessageType);
+                            Logger.Debug("Received message with type: " + result.MessageType);
                         }
 
                         switch (result.MessageType)
